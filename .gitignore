@@ -1,0 +1,13 @@
+./frontend/node_modules/
+./backend/venv/
+
+
+frontend/node_modules/
+backend/venv/
+
+*.log
+build/
+.idea/
+*.iml
+node_modules/
+venv/
