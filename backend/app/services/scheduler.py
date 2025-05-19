@@ -110,7 +110,6 @@ class TaskScheduler:
                 current_time += timedelta(minutes=15)
                 logger.info(f"No schedulable tasks found, moving time to {current_time}")
         
-        # Log unscheduled tasks
         if unscheduled_tasks:
             logger.warning(f"Could not schedule {len(unscheduled_tasks)} tasks")
             for task in unscheduled_tasks:
