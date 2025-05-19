@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   Box, Typography, Paper, TextField, Button, 
   Grid, CircularProgress, Alert, FormControl,
@@ -8,7 +8,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { format } from 'date-fns';
+import { format, parse } from 'date-fns';
 import api from '../services/api';
 
 // Default user ID for all tasks since we removed authentication
@@ -23,14 +23,17 @@ const TIME_OPTIONS = [
 ];
 
 const SchedulerPage = () => {
-  const [date, setDate] = useState(new Date());
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const dateParam = queryParams.get('date');
+  
+  const [date, setDate] = useState(dateParam ? parse(dateParam, 'yyyy-MM-dd', new Date()) : new Date());
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("17:00");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  
-  const navigate = useNavigate();
   
   const handleGenerateSchedule = async () => {
     // Reset states
@@ -53,12 +56,12 @@ const SchedulerPage = () => {
       const response = await api.post('/api/scheduler/generate', requestData);
       
       // Set success message
-      setSuccess(`Successfully scheduled ${response.data.length} tasks! Redirecting to calendar...`);
+      setSuccess(`Successfully scheduled ${response.data.length} tasks!`);
       
-      // Redirect to calendar after 2 seconds
+      // Redirect to schedule view page after 1 second
       setTimeout(() => {
-        navigate('/calendar');
-      }, 2000);
+        navigate(`/schedule/view/${formattedDate}`);
+      }, 1000);
       
     } catch (err) {
       console.error('Error generating schedule:', err);

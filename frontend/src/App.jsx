@@ -9,6 +9,7 @@ import Calendar from './pages/Calendar';
 import Tasks from './pages/Tasks';
 import Reports from './pages/Reports';
 import Scheduler from './pages/Scheduler';
+import ScheduleView from './pages/ScheduleView';
 import NotFound from './pages/NotFound';
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
         <Route path="tasks" element={<Tasks />} />
         <Route path="reports" element={<Reports />} />
         <Route path="scheduler/generate" element={<Scheduler />} />
+        <Route path="schedule/view/:date?" element={<ScheduleView />} />
       </Route>
       
       {/* Not found route */}

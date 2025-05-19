@@ -30,6 +30,7 @@ const Dashboard = () => {
   const [upcomingTasks, setUpcomingTasks] = useState([]);
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [hasSchedule, setHasSchedule] = useState(false);
   
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -49,6 +50,10 @@ const Dashboard = () => {
         
         console.log('Tasks response:', tasksResponse);
         const tasks = tasksResponse.data || [];
+        
+        // Check if any tasks are scheduled for today (have scheduled_start_time)
+        const scheduledTasks = tasks.filter(task => task.scheduled_start_time);
+        setHasSchedule(scheduledTasks.length > 0);
         
         // Calculate task statistics
         const completed = tasks.filter(task => task.status === 'completed').length;
@@ -266,15 +271,44 @@ const Dashboard = () => {
                 </Button>
               </Grid>
               <Grid item xs={12}>
-                <Button 
-                  component={Link}
-                  to="/scheduler/generate"
-                  variant="contained" 
-                  fullWidth 
-                  sx={{ py: 1.5, mt: 1 }}
-                >
-                  Generate Today's Schedule
-                </Button>
+                {hasSchedule ? (
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <Button 
+                        component={Link}
+                        to={`/schedule/view/${format(new Date(), 'yyyy-MM-dd')}`}
+                        variant="contained" 
+                        color="primary"
+                        fullWidth 
+                        sx={{ py: 1.5, mt: 1 }}
+                      >
+                        View Today's Schedule
+                      </Button>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Button 
+                        component={Link}
+                        to={`/scheduler/generate?date=${format(new Date(), 'yyyy-MM-dd')}`}
+                        variant="outlined"
+                        color="secondary" 
+                        fullWidth 
+                        sx={{ py: 1.5, mt: 1 }}
+                      >
+                        Regenerate Schedule
+                      </Button>
+                    </Grid>
+                  </Grid>
+                ) : (
+                  <Button 
+                    component={Link}
+                    to="/scheduler/generate"
+                    variant="contained" 
+                    fullWidth 
+                    sx={{ py: 1.5, mt: 1 }}
+                  >
+                    Generate Today's Schedule
+                  </Button>
+                )}
               </Grid>
             </Grid>
           </Paper>
