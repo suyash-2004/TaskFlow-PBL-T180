@@ -4,9 +4,9 @@ import {
   DialogContent, DialogActions, List, ListItem, ListItemText, 
   ListItemSecondaryAction, IconButton, Chip, MenuItem, FormControl,
   InputLabel, Select, Divider, CircularProgress, Grid, Tooltip,
-  Snackbar, Alert
+  Snackbar, Alert, OutlinedInput, ListItemAvatar, Avatar
 } from '@mui/material';
-import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, Link as LinkIcon } from '@mui/icons-material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -15,6 +15,17 @@ import api from '../services/api';
 
 // Default user ID for all tasks since we removed authentication
 const DEFAULT_USER_ID = "default_user";
+
+const ITEM_HEIGHT = 48;
+const ITEM_PADDING_TOP = 8;
+const MenuProps = {
+  PaperProps: {
+    style: {
+      maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP,
+      width: 250,
+    },
+  },
+};
 
 const Tasks = () => {
   const [tasks, setTasks] = useState([]);
@@ -124,6 +135,20 @@ const Tasks = () => {
     });
   };
   
+  const handleDependenciesChange = (event) => {
+    const {
+      target: { value },
+    } = event;
+    
+    // On autofill we get a stringified value.
+    const selectedDependencies = typeof value === 'string' ? value.split(',') : value;
+    
+    setTaskForm({
+      ...taskForm,
+      dependencies: selectedDependencies
+    });
+  };
+  
   const handleDeadlineChange = (newValue) => {
     setTaskForm({
       ...taskForm,
@@ -136,11 +161,48 @@ const Tasks = () => {
     setIsSubmitting(true);
     
     try {
+      // Create a copy of the form data
       const formData = {
         ...taskForm,
-        user_id: DEFAULT_USER_ID, // Ensure we always use the default user ID
-        deadline: taskForm.deadline ? taskForm.deadline.toISOString() : null
+        user_id: DEFAULT_USER_ID // Ensure we always use the default user ID
       };
+      
+      // Handle deadline timezone conversion
+      if (taskForm.deadline) {
+        // Log original date for debugging
+        console.log('Original deadline selected:', taskForm.deadline);
+        
+        // Create a date string that explicitly preserves the local time components
+        const d = new Date(taskForm.deadline);
+        
+        // Store the user's selected date components (year, month, day, hour, minute)
+        const userSelectedDate = {
+          year: d.getFullYear(),
+          month: d.getMonth(),
+          day: d.getDate(),
+          hour: d.getHours(),
+          minute: d.getMinutes()
+        };
+        
+        console.log('User selected time components:', userSelectedDate);
+        
+        // Create an ISO string with Z suffix to indicate UTC
+        // but first create a new Date with the same local time components
+        const utcDate = new Date(Date.UTC(
+          userSelectedDate.year,
+          userSelectedDate.month,
+          userSelectedDate.day,
+          userSelectedDate.hour,
+          userSelectedDate.minute
+        ));
+        
+        formData.deadline = utcDate.toISOString();
+        
+        // Log the formatted date
+        console.log('Formatted deadline for API:', formData.deadline);
+      } else {
+        formData.deadline = null;
+      }
       
       if (editingTaskId) {
         // Update existing task
@@ -220,6 +282,18 @@ const Tasks = () => {
     }
   };
   
+  const formatDeadlineDate = (dateString) => {
+    try {
+      const date = new Date(dateString);
+      
+      // Format with explicit timezone indication
+      return format(date, 'MMM d, yyyy h:mm a');
+    } catch (error) {
+      console.error('Error formatting deadline date:', error);
+      return 'Invalid date';
+    }
+  };
+  
   if (isLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="70vh">
@@ -282,7 +356,32 @@ const Tasks = () => {
                         <br />
                         <Typography variant="caption" component="span">
                           Duration: {task.duration} min | Status: {task.status}
-                          {task.deadline && ` | Deadline: ${format(new Date(task.deadline), 'MMM d, yyyy h:mm a')}`}
+                          {task.deadline && (
+                            ` | Deadline: ${formatDeadlineDate(task.deadline)}`
+                          )}
+                          {task.dependencies && task.dependencies.length > 0 && (
+                            <>
+                              <br />
+                              <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                                <LinkIcon fontSize="inherit" sx={{ mr: 0.5 }} />
+                                <span>Dependencies: </span>
+                                <Box sx={{ display: 'inline-flex', flexWrap: 'wrap', gap: 0.5, ml: 0.5 }}>
+                                  {task.dependencies.map(depId => {
+                                    const dependentTask = tasks.find(t => t.id === depId);
+                                    return (
+                                      <Chip 
+                                        key={depId} 
+                                        label={dependentTask?.name || depId.substring(0, 8)} 
+                                        size="small"
+                                        variant="outlined"
+                                        sx={{ height: 20, fontSize: '0.65rem' }}
+                                      />
+                                    );
+                                  })}
+                                </Box>
+                              </Box>
+                            </>
+                          )}
                         </Typography>
                       </Box>
                     } 
@@ -375,6 +474,63 @@ const Tasks = () => {
               </FormControl>
             )}
             
+            <FormControl fullWidth margin="normal">
+              <InputLabel id="dependencies-label">Dependencies</InputLabel>
+              <Select
+                labelId="dependencies-label"
+                id="dependencies-select"
+                multiple
+                value={taskForm.dependencies}
+                onChange={handleDependenciesChange}
+                input={<OutlinedInput label="Dependencies" />}
+                renderValue={(selected) => {
+                  if (selected.length === 0) {
+                    return <em>No dependencies</em>;
+                  }
+                  
+                  return (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {selected.map((depId) => {
+                        const dependentTask = tasks.find(task => task.id === depId);
+                        return (
+                          <Chip 
+                            key={depId} 
+                            label={dependentTask ? dependentTask.name : depId.substring(0, 8)} 
+                            size="small"
+                          />
+                        );
+                      })}
+                    </Box>
+                  );
+                }}
+                MenuProps={MenuProps}
+              >
+                {/* Filter out the current task being edited and display available tasks */}
+                {tasks
+                  .filter(task => !editingTaskId || task.id !== editingTaskId)
+                  .map((task) => (
+                    <MenuItem
+                      key={task.id}
+                      value={task.id}
+                      disabled={editingTaskId && task.dependencies && task.dependencies.includes(editingTaskId)}
+                    >
+                      <ListItemAvatar>
+                        <Avatar sx={{ bgcolor: getPriorityColor(task.priority), width: 24, height: 24, fontSize: '0.75rem' }}>
+                          {task.priority}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText 
+                        primary={task.name}
+                        secondary={`${task.duration} min | ${task.status}`}
+                      />
+                    </MenuItem>
+                  ))}
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1 }}>
+                Select tasks that must be completed before this task can start
+              </Typography>
+            </FormControl>
+            
             <Box mt={2}>
               <LocalizationProvider dateAdapter={AdapterDateFns}>
                 <DateTimePicker
@@ -382,8 +538,16 @@ const Tasks = () => {
                   value={taskForm.deadline}
                   onChange={handleDeadlineChange}
                   renderInput={(params) => <TextField {...params} fullWidth />}
+                  ampm={true}
+                  minutesStep={5}
                 />
               </LocalizationProvider>
+              {taskForm.deadline && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1, display: 'block' }}>
+                  Selected: {format(new Date(taskForm.deadline), 'MMM d, yyyy h:mm a')}
+                  <strong> (This exact time will be saved)</strong>
+                </Typography>
+              )}
             </Box>
           </Box>
         </DialogContent>

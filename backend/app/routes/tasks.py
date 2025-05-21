@@ -3,11 +3,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Path
 from fastapi.responses import JSONResponse
 from bson import ObjectId
+import logging
 
 from app.database import get_database
 from app.models import TaskCreate, TaskUpdate, TaskResponse, TaskInDB
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/", response_model=TaskResponse, status_code=201)
 async def create_task(
@@ -19,6 +21,18 @@ async def create_task(
     """
     # Create new task
     task_dict = task.dict()
+    
+    # Log incoming task data for debugging
+    if task_dict.get("deadline"):
+        logger.info(f"Received deadline in task creation: {task_dict['deadline']}")
+        # Log in a more readable format too
+        try:
+            deadline_dt = datetime.fromisoformat(task_dict['deadline'].replace('Z', '+00:00'))
+            logger.info(f"Parsed deadline as: {deadline_dt} (UTC)")
+        except Exception as e:
+            logger.error(f"Error parsing deadline: {e}")
+    
+    # Set creation timestamps
     task_dict["created_at"] = datetime.utcnow()
     task_dict["updated_at"] = task_dict["created_at"]
     task_dict["status"] = "pending"
@@ -28,6 +42,10 @@ async def create_task(
     
     # Get the created task
     created_task = await db["tasks"].find_one({"_id": result.inserted_id})
+    
+    # Log stored deadline for debugging
+    if created_task.get("deadline"):
+        logger.info(f"Stored deadline in database: {created_task['deadline']}")
     
     return TaskResponse(id=str(created_task["_id"]), **created_task)
 
@@ -114,8 +132,18 @@ async def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Update task
+    # Log incoming update data for debugging
     update_data = {k: v for k, v in task_update.dict(exclude_unset=True).items() if v is not None}
+    if "deadline" in update_data:
+        logger.info(f"Updating task {task_id} with deadline: {update_data['deadline']}")
+        # Log in a more readable format too
+        try:
+            deadline_dt = datetime.fromisoformat(update_data['deadline'].replace('Z', '+00:00'))
+            logger.info(f"Parsed update deadline as: {deadline_dt} (UTC)")
+        except Exception as e:
+            logger.error(f"Error parsing update deadline: {e}")
+    
+    # Add update timestamp
     update_data["updated_at"] = datetime.utcnow()
     
     # Update in database
@@ -126,6 +154,10 @@ async def update_task(
     
     # Get updated task
     updated_task = await db["tasks"].find_one({"_id": ObjectId(task_id)})
+    
+    # Log stored deadline for debugging
+    if updated_task.get("deadline"):
+        logger.info(f"Updated deadline in database: {updated_task['deadline']}")
     
     return TaskResponse(id=str(updated_task["_id"]), **updated_task)
 

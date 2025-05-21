@@ -1,0 +1,6 @@
+cd backend
+.\venv\Scripts\Activate.ps1
+python -m uvicorn main:app
+
+cd frontend
+npm run dev

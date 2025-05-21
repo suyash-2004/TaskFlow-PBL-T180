@@ -77,6 +77,121 @@ const ScheduleView = () => {
     fetchSchedule();
   }, [date]);
   
+  // Add a new effect to restore breaks after schedule regeneration
+  useEffect(() => {
+    const restoreBreaksAfterRegeneration = async () => {
+      // Check if we have just regenerated the schedule and have breaks to restore
+      const preservedBreaksJSON = localStorage.getItem('preserved_breaks');
+      
+      if (preservedBreaksJSON && schedule.length > 0) {
+        try {
+          const preservedBreaks = JSON.parse(preservedBreaksJSON);
+          
+          if (preservedBreaks.length > 0) {
+            console.log("Found preserved breaks to restore:", preservedBreaks);
+            
+            // Remove any existing breaks that might have been regenerated
+            const scheduleWithoutBreaks = schedule.filter(task => task.status !== 'break');
+            
+            if (scheduleWithoutBreaks.length === 0) {
+              console.log("No tasks found in schedule to position breaks between");
+              return;
+            }
+            
+            // Re-add preserved breaks to the schedule
+            const updatedSchedule = [...scheduleWithoutBreaks];
+            
+            // For each preserved break, find the best position to reinsert it
+            for (const breakTask of preservedBreaks) {
+              // Store the original break position relative to tasks
+              // We need to find the task that comes before this break based on the original sequence
+              const originalBreakTime = new Date(breakTask.scheduled_start_time);
+              
+              // Find the task that should come just before this break
+              let previousTaskIndex = -1;
+              let previousTaskEndTime = null;
+              let earliestNextTaskStartTime = null;
+              
+              // First, find the task that ended right before this break in the original schedule
+              for (let i = 0; i < updatedSchedule.length; i++) {
+                const taskEndTime = updatedSchedule[i].scheduled_end_time ? 
+                  new Date(updatedSchedule[i].scheduled_end_time) : null;
+                  
+                const taskStartTime = updatedSchedule[i].scheduled_start_time ?
+                  new Date(updatedSchedule[i].scheduled_start_time) : null;
+                
+                if (taskEndTime && taskEndTime <= originalBreakTime) {
+                  // This task ends before or at the break's original start time
+                  // If it's the latest such task we've found, update our reference
+                  if (previousTaskEndTime === null || taskEndTime > previousTaskEndTime) {
+                    previousTaskIndex = i;
+                    previousTaskEndTime = taskEndTime;
+                  }
+                }
+                
+                // Also track the earliest next task that starts after the break's original end time
+                // This helps us adjust the break duration if needed
+                const breakEndTime = new Date(breakTask.scheduled_end_time);
+                if (taskStartTime && taskStartTime > breakEndTime) {
+                  if (earliestNextTaskStartTime === null || taskStartTime < earliestNextTaskStartTime) {
+                    earliestNextTaskStartTime = taskStartTime;
+                  }
+                }
+              }
+              
+              // If we found a task that should come before the break
+              if (previousTaskIndex !== -1 && previousTaskEndTime) {
+                // Set the break to start right after the previous task
+                const newBreakStartTime = new Date(previousTaskEndTime);
+                const newBreakEndTime = new Date(newBreakStartTime);
+                newBreakEndTime.setMinutes(newBreakEndTime.getMinutes() + breakTask.duration);
+                
+                // Create updated break task with new times
+                const updatedBreakTask = {
+                  ...breakTask,
+                  scheduled_start_time: newBreakStartTime.toISOString(),
+                  scheduled_end_time: newBreakEndTime.toISOString()
+                };
+                
+                // Insert the break after the previous task
+                updatedSchedule.splice(previousTaskIndex + 1, 0, updatedBreakTask);
+                console.log(`Re-inserted break after task at index ${previousTaskIndex}, with new time ${formatTime(updatedBreakTask.scheduled_start_time)} - ${formatTime(updatedBreakTask.scheduled_end_time)}`);
+                
+                // Update database with the new break time
+                api.put(`/api/tasks/${breakTask.id}`, {
+                  scheduled_start_time: updatedBreakTask.scheduled_start_time,
+                  scheduled_end_time: updatedBreakTask.scheduled_end_time
+                }).catch(err => console.error("Error updating break time in database:", err));
+              } else {
+                // Fallback: Place break at end of schedule if we can't find a good position
+                console.log("Could not find appropriate position for break, adding to end");
+                updatedSchedule.push(breakTask);
+              }
+            }
+            
+            // Sort the final schedule by start time to ensure correct order
+            const sortedSchedule = updatedSchedule.sort((a, b) => {
+              if (!a.scheduled_start_time) return 1;
+              if (!b.scheduled_start_time) return -1;
+              return new Date(a.scheduled_start_time) - new Date(b.scheduled_start_time);
+            });
+            
+            // Update the schedule with restored breaks
+            setSchedule(sortedSchedule);
+            
+            // Clear the preserved breaks from storage
+            localStorage.removeItem('preserved_breaks');
+            console.log("Restored breaks and cleared preservation data");
+          }
+        } catch (error) {
+          console.error("Error restoring preserved breaks:", error);
+        }
+      }
+    };
+    
+    restoreBreaksAfterRegeneration();
+  }, [schedule.length]); // Re-run when schedule length changes, which happens after regeneration
+  
   const fetchSchedule = async () => {
     setIsLoading(true);
     setError(null);
@@ -105,7 +220,14 @@ const ScheduleView = () => {
     }
   };
   
-  const handleRegenerate = () => {
+  const handleRegenerate = async () => {
+    // Before navigating, store any breaks in localStorage so they can be preserved
+    const existingBreaks = schedule.filter(task => task.status === 'break');
+    if (existingBreaks.length > 0) {
+      console.log("Preserving breaks before regenerating schedule:", existingBreaks);
+      localStorage.setItem('preserved_breaks', JSON.stringify(existingBreaks));
+    }
+    
     navigate(`/scheduler/generate?date=${date || format(new Date(), 'yyyy-MM-dd')}`);
   };
   
@@ -200,10 +322,51 @@ const ScheduleView = () => {
         }
       }
       
-      // First add the break
-      await api.post('/api/tasks', breakTask);
+      // First add the break to the database
+      const response = await api.post('/api/tasks', breakTask);
+      const createdBreak = response.data;
+      console.log("Break created:", createdBreak);
       
-      // Then update all tasks that need shifting
+      // Make a copy of the current schedule for updating
+      const updatedSchedule = [...schedule];
+      
+      // If we need to shift tasks, update their times in our local state
+      if (needsShift) {
+        for (let i = selectedGap.index + 1; i < updatedSchedule.length; i++) {
+          const taskIndex = i - (selectedGap.index + 1);
+          if (taskIndex < tasksToUpdate.length) {
+            updatedSchedule[i] = {
+              ...updatedSchedule[i],
+              scheduled_start_time: tasksToUpdate[taskIndex].scheduled_start_time,
+              scheduled_end_time: tasksToUpdate[taskIndex].scheduled_end_time
+            };
+          }
+        }
+      }
+      
+      // Create our break object for the UI with the ID from the server response
+      // but ensuring we use our properly formatted time strings
+      const uiBreakTask = {
+        ...createdBreak,
+        scheduled_start_time: breakTask.scheduled_start_time,
+        scheduled_end_time: breakTask.scheduled_end_time
+      };
+      
+      console.log("UI Break Task with times:", uiBreakTask);
+      
+      // Important: Insert the break at the correct position - immediately after selectedGap.index
+      updatedSchedule.splice(selectedGap.index + 1, 0, uiBreakTask);
+      console.log("Break inserted at index:", selectedGap.index + 1);
+      
+      // Don't sort the schedule as it would change the position of our newly added break
+      // Instead, trust the position we've manually set
+      setSchedule(updatedSchedule);
+      console.log("Schedule state updated with break");
+      
+      // Close the dialog immediately for better UX
+      setBreakDialogOpen(false);
+      
+      // Then update all tasks that need shifting in the database
       if (tasksToUpdate.length > 0) {
         // Use Promise.all to update all tasks in parallel for better performance
         await Promise.all(tasksToUpdate.map(task => 
@@ -216,10 +379,6 @@ const ScheduleView = () => {
         
         console.log(`Shifted ${tasksToUpdate.length} tasks forward by ${breakDuration - selectedGap.maxDuration} minutes`);
       }
-      
-      // Refresh the schedule
-      fetchSchedule();
-      setBreakDialogOpen(false);
     } catch (error) {
       console.error("Error adding break:", error);
       alert("Failed to add break. Please try again.");
