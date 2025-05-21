@@ -75,7 +75,7 @@ const SchedulerPage = () => {
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box>
         <Typography variant="h4" mb={3}>Generate Schedule</Typography>
-        
+         
         <Paper elevation={3} sx={{ p: 3, maxWidth: 600, mx: 'auto' }}>
           <Typography variant="h6" mb={3}>
             Schedule unplanned tasks for a specific date
