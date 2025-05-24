@@ -3,8 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   Box, Typography, Paper, TextField, Button, 
   Grid, CircularProgress, Alert, FormControl,
-  InputLabel, MenuItem, Select, Stack
+  InputLabel, MenuItem, Select, Stack, Tooltip, IconButton
 } from '@mui/material';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -22,6 +23,35 @@ const TIME_OPTIONS = [
   "20:00", "20:30", "21:00"
 ];
 
+// Algorithm options
+const ALGORITHM_OPTIONS = [
+  { 
+    value: "round_robin", 
+    label: "Round Robin", 
+    description: "Priority-based Round Robin (considers both priority and deadlines)" 
+  },
+  { 
+    value: "fcfs", 
+    label: "First Come First Served", 
+    description: "Schedules tasks in the order they were created" 
+  },
+  { 
+    value: "sjf", 
+    label: "Shortest Job First", 
+    description: "Schedules shortest duration tasks first" 
+  },
+  { 
+    value: "ljf", 
+    label: "Longest Job First", 
+    description: "Schedules longest duration tasks first" 
+  },
+  { 
+    value: "priority", 
+    label: "Priority Only", 
+    description: "Schedules based solely on task priority" 
+  }
+];
+
 const SchedulerPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -31,6 +61,7 @@ const SchedulerPage = () => {
   const [date, setDate] = useState(dateParam ? parse(dateParam, 'yyyy-MM-dd', new Date()) : new Date());
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("17:00");
+  const [algorithm, setAlgorithm] = useState("round_robin");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -49,19 +80,33 @@ const SchedulerPage = () => {
         date: formattedDate,
         start_time: startTime,
         end_time: endTime,
-        user_id: DEFAULT_USER_ID
+        user_id: DEFAULT_USER_ID,
+        algorithm: algorithm
       };
       
       // Call API to generate schedule
       const response = await api.post('/api/scheduler/generate', requestData);
       
       // Set success message
-      setSuccess(`Successfully scheduled ${response.data.length} tasks!`);
+      setSuccess(`Successfully scheduled ${response.data.length} tasks using ${getAlgorithmLabel(algorithm)}!`);
       
-      // Redirect to schedule view page after 1 second
+      // Clear any cached data for this date by calling the reset endpoint
+      try {
+        await api.post(`/api/scheduler/reset/${formattedDate}`, {
+          user_id: DEFAULT_USER_ID
+        });
+        console.log('Cleared previous schedule data for', formattedDate);
+      } catch (resetErr) {
+        console.error('Error clearing previous schedule:', resetErr);
+        // Continue even if this fails
+      }
+      
+      // Add a small delay to ensure database operations complete
       setTimeout(() => {
-        navigate(`/schedule/view/${formattedDate}`);
-      }, 1000);
+        // Add a timestamp to force cache refresh when redirecting
+        const timestamp = new Date().getTime();
+        navigate(`/schedule/view/${formattedDate}?refresh=${timestamp}`);
+      }, 1500);
       
     } catch (err) {
       console.error('Error generating schedule:', err);
@@ -69,6 +114,12 @@ const SchedulerPage = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+  
+  // Helper function to get algorithm label from value
+  const getAlgorithmLabel = (value) => {
+    const algorithm = ALGORITHM_OPTIONS.find(option => option.value === value);
+    return algorithm ? algorithm.label : value;
   };
   
   return (
@@ -132,6 +183,34 @@ const SchedulerPage = () => {
                     <MenuItem key={time} value={time}>{time}</MenuItem>
                   ))}
                 </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel id="algorithm-label">Scheduling Algorithm</InputLabel>
+                <Select
+                  labelId="algorithm-label"
+                  value={algorithm}
+                  label="Scheduling Algorithm"
+                  onChange={(e) => setAlgorithm(e.target.value)}
+                >
+                  {ALGORITHM_OPTIONS.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <Box mt={1} display="flex" alignItems="center">
+                  <Typography variant="caption" color="text.secondary">
+                    {ALGORITHM_OPTIONS.find(option => option.value === algorithm)?.description}
+                  </Typography>
+                  <Tooltip title="Different algorithms prioritize tasks differently. Choose the one that best fits your needs.">
+                    <IconButton size="small">
+                      <HelpOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
               </FormControl>
             </Grid>
             

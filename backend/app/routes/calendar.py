@@ -56,7 +56,20 @@ async def get_month_tasks(
         
         tasks = await cursor.to_list(length=500)  # Increased limit for month view
         
-        return [TaskResponse(id=str(task["_id"]), **task) for task in tasks]
+        # Add default status for tasks that don't have it
+        result_tasks = []
+        for task in tasks:
+            if "status" not in task:
+                task["status"] = "pending"
+                # Also update the task in the database to fix it permanently
+                await db["tasks"].update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {"status": "pending"}}
+                )
+                logger.warning(f"Added missing status field to task {task['_id']}")
+            result_tasks.append(TaskResponse(id=str(task["_id"]), **task))
+        
+        return result_tasks
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -106,7 +119,20 @@ async def get_week_tasks(
         
         tasks = await cursor.to_list(length=200)  # Increased limit for week view
         
-        return [TaskResponse(id=str(task["_id"]), **task) for task in tasks]
+        # Add default status for tasks that don't have it
+        result_tasks = []
+        for task in tasks:
+            if "status" not in task:
+                task["status"] = "pending"
+                # Also update the task in the database to fix it permanently
+                await db["tasks"].update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {"status": "pending"}}
+                )
+                logger.warning(f"Added missing status field to task {task['_id']}")
+            result_tasks.append(TaskResponse(id=str(task["_id"]), **task))
+        
+        return result_tasks
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -152,7 +178,20 @@ async def get_day_tasks(
         
         tasks = await cursor.to_list(length=100)
         
-        return [TaskResponse(id=str(task["_id"]), **task) for task in tasks]
+        # Add default status for tasks that don't have it
+        result_tasks = []
+        for task in tasks:
+            if "status" not in task:
+                task["status"] = "pending"
+                # Also update the task in the database to fix it permanently
+                await db["tasks"].update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {"status": "pending"}}
+                )
+                logger.warning(f"Added missing status field to task {task['_id']}")
+            result_tasks.append(TaskResponse(id=str(task["_id"]), **task))
+        
+        return result_tasks
         
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD") 

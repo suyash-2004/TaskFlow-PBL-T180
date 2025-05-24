@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Box, Typography, Paper, CircularProgress, 
   Grid, Card, CardContent, Divider, 
   Chip, Button, Alert, Stack, 
   LinearProgress, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Collapse, Zoom, Fade
+  TextField, Collapse, Zoom, Fade,
+  FormControl, InputLabel, Select, MenuItem,
+  Snackbar
 } from '@mui/material';
+import MuiAlert from '@mui/material/Alert';
 import { 
   AccessTime as TimeIcon, 
   Event as EventIcon,
@@ -18,10 +21,14 @@ import {
   Schedule as ScheduleIcon,
   Add as AddIcon,
   Coffee as CoffeeIcon,
-  LocalCafe as LocalCafeIcon
+  LocalCafe as LocalCafeIcon,
+  Done as DoneIcon,
+  DoneAll as DoneAllIcon
 } from '@mui/icons-material';
 import { format, parseISO, addMinutes } from 'date-fns';
 import api from '../services/api';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 
 // Default user ID
 const DEFAULT_USER_ID = "default_user";
@@ -63,6 +70,7 @@ const formatTime = (timeString) => {
 
 const ScheduleView = () => {
   const { date } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [schedule, setSchedule] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,9 +81,38 @@ const ScheduleView = () => {
   const [breakDuration, setBreakDuration] = useState(15); // Default break duration: 15 minutes
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // State for task completion dialog
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [isSubmittingTaskUpdate, setIsSubmittingTaskUpdate] = useState(false);
+  const [taskUpdateForm, setTaskUpdateForm] = useState({
+    actual_start_time: null,
+    actual_end_time: null,
+    status: 'completed'
+  });
+  
+  // Snackbar notification state
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
+  
   useEffect(() => {
+    // Extract refresh parameter from URL
+    const queryParams = new URLSearchParams(location.search);
+    const refreshParam = queryParams.get('refresh');
+    
+    // Always fetch the schedule when the component mounts or date changes
     fetchSchedule();
-  }, [date]);
+    
+    // If there's a refresh parameter, remove it from the URL to prevent unnecessary refreshes
+    if (refreshParam) {
+      // Replace the current URL without the refresh parameter
+      navigate(`/schedule/view/${date}`, { replace: true });
+      console.log('Detected refresh parameter, schedule data was refreshed');
+    }
+  }, [date, location.search]);
   
   // Add a new effect to restore breaks after schedule regeneration
   useEffect(() => {
@@ -199,9 +236,15 @@ const ScheduleView = () => {
     try {
       const formattedDate = date || format(new Date(), 'yyyy-MM-dd');
       
+      // Use a cache-busting parameter to ensure we get fresh data
+      const cacheBuster = new Date().getTime();
+      
       // Fetch tasks for the specified date
       const response = await api.get(`/api/scheduler/daily/${formattedDate}`, {
-        params: { user_id: DEFAULT_USER_ID }
+        params: { 
+          user_id: DEFAULT_USER_ID,
+          _cache: cacheBuster  // Add cache-busting parameter
+        }
       });
       
       // Sort tasks by scheduled_start_time
@@ -212,6 +255,7 @@ const ScheduleView = () => {
       });
       
       setSchedule(sortedTasks);
+      console.log('Schedule refreshed with', sortedTasks.length, 'tasks at', new Date().toLocaleTimeString());
     } catch (err) {
       console.error('Error fetching schedule:', err);
       setError('Failed to load schedule. Please try again.');
@@ -387,6 +431,106 @@ const ScheduleView = () => {
     }
   };
   
+  const handleMarkAsCompleteClick = (task) => {
+    // Set default actual start time to scheduled start time if available
+    const defaultStartTime = task.scheduled_start_time ? new Date(task.scheduled_start_time) : new Date();
+    
+    // Set default actual end time to now
+    const defaultEndTime = new Date();
+    
+    setSelectedTask(task);
+    setTaskUpdateForm({
+      actual_start_time: defaultStartTime,
+      actual_end_time: defaultEndTime,
+      status: 'completed'
+    });
+    setCompleteDialogOpen(true);
+  };
+  
+  const handleCompleteDialogClose = () => {
+    setCompleteDialogOpen(false);
+    setSelectedTask(null);
+  };
+  
+  const handleTaskUpdateChange = (field, value) => {
+    setTaskUpdateForm({
+      ...taskUpdateForm,
+      [field]: value
+    });
+  };
+  
+  const isTaskUpdateValid = () => {
+    return taskUpdateForm.actual_start_time !== null && 
+           taskUpdateForm.actual_end_time !== null &&
+           taskUpdateForm.status !== '';
+  };
+  
+  const handleSnackbarClose = () => {
+    setSnackbar({
+      ...snackbar,
+      open: false
+    });
+  };
+  
+  const handleSubmitTaskUpdate = async () => {
+    if (!selectedTask) return;
+    
+    // Validate that end time is after start time
+    if (taskUpdateForm.actual_start_time && taskUpdateForm.actual_end_time) {
+      if (new Date(taskUpdateForm.actual_end_time) <= new Date(taskUpdateForm.actual_start_time)) {
+        alert("End time must be after start time");
+        return;
+      }
+    }
+    
+    setIsSubmittingTaskUpdate(true);
+    
+    try {
+      // Prepare data for API
+      const updateData = {
+        ...taskUpdateForm,
+        actual_start_time: taskUpdateForm.actual_start_time ? taskUpdateForm.actual_start_time.toISOString() : null,
+        actual_end_time: taskUpdateForm.actual_end_time ? taskUpdateForm.actual_end_time.toISOString() : null
+      };
+      
+      // Log for debugging
+      console.log(`Updating task ${selectedTask.id} with:`, updateData);
+      
+      // Update task with PUT request
+      const response = await api.put(`/api/tasks/${selectedTask.id}`, updateData);
+      
+      // Update local state
+      const updatedSchedule = schedule.map(task => 
+        task.id === selectedTask.id ? { ...task, ...updateData } : task
+      );
+      setSchedule(updatedSchedule);
+      
+      // Log success
+      console.log(`Task ${selectedTask.id} updated successfully:`, response.data);
+      
+      // Show success notification
+      setSnackbar({
+        open: true,
+        message: `Task "${selectedTask.name}" has been ${updateData.status}!`,
+        severity: 'success'
+      });
+      
+      // Close dialog
+      handleCompleteDialogClose();
+    } catch (error) {
+      console.error("Error updating task:", error);
+      
+      // Show error notification
+      setSnackbar({
+        open: true,
+        message: 'Failed to update task. Please try again.',
+        severity: 'error'
+      });
+    } finally {
+      setIsSubmittingTaskUpdate(false);
+    }
+  };
+  
   if (isLoading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
@@ -457,6 +601,7 @@ const ScheduleView = () => {
               {schedule.map((task, index) => {
                 const priorityStyle = getPriorityColor(task.priority);
                 const isBreak = task.status === 'break';
+                const isCompleted = task.status === 'completed';
                 
                 return (
                   <Box key={task.id}>
@@ -495,6 +640,7 @@ const ScheduleView = () => {
                           <Box display="flex" justifyContent="space-between" alignItems="center">
                             <Typography variant="subtitle1" fontWeight="500" sx={{ display: 'flex', alignItems: 'center' }}>
                               {isBreak && <LocalCafeIcon sx={{ mr: 1, color: getStatusColor('break') }} />}
+                              {isCompleted && <DoneAllIcon sx={{ mr: 1, color: getStatusColor('completed') }} />}
                               {task.name}
                             </Typography>
                             {!isBreak && (
@@ -515,11 +661,24 @@ const ScheduleView = () => {
                               label={`${task.duration} min`} 
                               variant="outlined"
                             />
-                            <Chip 
-                              size="small" 
-                              label={isBreak ? "Break" : task.status.charAt(0).toUpperCase() + task.status.slice(1)} 
-                              sx={{ bgcolor: `${getStatusColor(task.status)}20`, color: getStatusColor(task.status) }}
-                            />
+                            <Box display="flex" gap={1} alignItems="center">
+                              {!isBreak && !isCompleted && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="success"
+                                  startIcon={<DoneIcon />}
+                                  onClick={() => handleMarkAsCompleteClick(task)}
+                                >
+                                  Mark Complete
+                                </Button>
+                              )}
+                              <Chip 
+                                size="small" 
+                                label={isBreak ? "Break" : task.status.charAt(0).toUpperCase() + task.status.slice(1)} 
+                                sx={{ bgcolor: `${getStatusColor(task.status)}20`, color: getStatusColor(task.status) }}
+                              />
+                            </Box>
                           </Box>
                         </CardContent>
                       </Card>
@@ -671,6 +830,91 @@ const ScheduleView = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      
+      {/* Task Complete Dialog */}
+      <Dialog open={completeDialogOpen} onClose={handleCompleteDialogClose} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center' }}>
+          <DoneIcon sx={{ mr: 1 }} /> Mark Task as Complete
+        </DialogTitle>
+        <DialogContent>
+          {selectedTask && (
+            <>
+              <Typography variant="h6" gutterBottom>
+                {selectedTask.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Please specify when you started and finished this task:
+              </Typography>
+              
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <DateTimePicker
+                      label="Actual Start Time"
+                      value={taskUpdateForm.actual_start_time}
+                      onChange={(newValue) => handleTaskUpdateChange('actual_start_time', newValue)}
+                      renderInput={(params) => <TextField {...params} fullWidth variant="outlined" />}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <DateTimePicker
+                      label="Actual End Time"
+                      value={taskUpdateForm.actual_end_time}
+                      onChange={(newValue) => handleTaskUpdateChange('actual_end_time', newValue)}
+                      renderInput={(params) => <TextField {...params} fullWidth variant="outlined" />}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <FormControl fullWidth>
+                      <InputLabel>Status</InputLabel>
+                      <Select
+                        value={taskUpdateForm.status}
+                        label="Status"
+                        onChange={(e) => handleTaskUpdateChange('status', e.target.value)}
+                      >
+                        <MenuItem value="pending">Pending</MenuItem>
+                        <MenuItem value="in_progress">In Progress</MenuItem>
+                        <MenuItem value="completed">Completed</MenuItem>
+                        <MenuItem value="cancelled">Cancelled</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+              </LocalizationProvider>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCompleteDialogClose}>Cancel</Button>
+          <Button 
+            onClick={handleSubmitTaskUpdate}
+            disabled={isSubmittingTaskUpdate || !isTaskUpdateValid()}
+            variant="contained"
+            color="success"
+            startIcon={isSubmittingTaskUpdate ? <CircularProgress size={20} /> : <DoneAllIcon />}
+          >
+            Update Task
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Success/Error Notification */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <MuiAlert 
+          onClose={handleSnackbarClose} 
+          severity={snackbar.severity} 
+          sx={{ width: '100%' }}
+          elevation={6}
+          variant="filled"
+        >
+          {snackbar.message}
+        </MuiAlert>
+      </Snackbar>
     </Box>
   );
 };

@@ -1,24 +1,39 @@
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from bson import ObjectId
+import logging
 
 from app.database import get_database
 from app.models import TaskResponse, TaskInDB
 from app.services import TaskScheduler
+from app.dependencies import DependencyManagerDep
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# Define the available scheduling algorithms for documentation
+SchedulingAlgorithm = Literal["round_robin", "fcfs", "sjf", "ljf", "priority"]
 
 @router.post("/generate", response_model=List[TaskResponse])
 async def generate_schedule(
+    dependency_manager: DependencyManagerDep,
+    db = Depends(get_database),
     date: str = Body(...),
     start_time: Optional[str] = Body(None),
     end_time: Optional[str] = Body(None),
     user_id: Optional[str] = Body("default_user"),
-    db = Depends(get_database)
+    algorithm: SchedulingAlgorithm = Body("round_robin", description="Scheduling algorithm to use")
 ):
     """
-    Generate a daily schedule for the specified date using the Round Robin algorithm.
+    Generate a daily schedule for the specified date using the selected algorithm.
+    
+    Available algorithms:
+    - round_robin: Priority-based Round Robin (considers both priority and deadlines)
+    - fcfs: First Come First Served (schedules tasks in the order they were created)
+    - sjf: Shortest Job First (schedules shortest duration tasks first)
+    - ljf: Longest Job First (schedules longest duration tasks first)
+    - priority: Priority only (schedules based solely on task priority)
     """
     try:
         # Parse date
@@ -43,7 +58,28 @@ async def generate_schedule(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid time format. Use HH:MM")
         
-        # Build query
+        # First, clear any existing schedule for this date to avoid showing old schedules
+        start_of_day = datetime.combine(schedule_date, datetime.min.time())
+        end_of_day = datetime.combine(schedule_date, datetime.max.time())
+        
+        # Find all tasks scheduled for this date and reset them
+        reset_query = {
+            "scheduled_start_time": {"$gte": start_of_day, "$lt": end_of_day},
+            "user_id": user_id
+        }
+        
+        reset_result = await db["tasks"].update_many(
+            reset_query,
+            {"$set": {
+                "scheduled_start_time": None,
+                "scheduled_end_time": None,
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        logger.info(f"Reset {reset_result.modified_count} previously scheduled tasks for {date}")
+        
+        # Build query to find unscheduled tasks
         query = {
             "status": {"$in": ["pending", "in_progress"]},
             "$or": [
@@ -66,8 +102,14 @@ async def generate_schedule(
         # Convert to TaskInDB objects
         task_objects = [TaskInDB(**task) for task in tasks]
         
-        # Initialize scheduler
-        scheduler = TaskScheduler(task_objects, schedule_start, schedule_end)
+        # Initialize scheduler with dependency manager and selected algorithm
+        scheduler = TaskScheduler(
+            task_objects, 
+            schedule_start, 
+            schedule_end, 
+            dependency_manager,
+            algorithm=algorithm
+        )
         
         # Generate schedule
         scheduled_tasks = scheduler.schedule()
@@ -118,22 +160,24 @@ async def get_daily_schedule(
         # Parse date
         schedule_date = datetime.strptime(date, "%Y-%m-%d").date()
         
-        # Find start and end of day
+        # Find tasks scheduled for this date
         start_of_day = datetime.combine(schedule_date, datetime.min.time())
         end_of_day = datetime.combine(schedule_date, datetime.max.time())
         
         # Build query
         query = {
-            "scheduled_start_time": {"$gte": start_of_day, "$lt": end_of_day}
+            "$or": [
+                {"scheduled_start_time": {"$gte": start_of_day, "$lte": end_of_day}},
+                {"scheduled_end_time": {"$gte": start_of_day, "$lte": end_of_day}}
+            ]
         }
         
         # Add user_id filter if provided
         if user_id:
             query["user_id"] = user_id
         
-        # Get all scheduled tasks for this date
-        cursor = db["tasks"].find(query).sort("scheduled_start_time", 1)  # Sort by start time ascending
-        
+        # Get tasks from database
+        cursor = db["tasks"].find(query)
         tasks = await cursor.to_list(length=100)
         
         return [TaskResponse(id=str(task["_id"]), **task) for task in tasks]
