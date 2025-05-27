@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class Semaphore:
     """
-    A counting semaphore implementation for managing task dependencies.
+    A counting semaphore implementation for managing task dependencies.    
     """
     def __init__(self, count: int = 0):
         self.count = count
