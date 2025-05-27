@@ -6,7 +6,7 @@ from app.services.dependency_manager import DependencyManager
 
 logger = logging.getLogger(__name__)
 
-# Define supported scheduling algorithms
+# Define supported scheduling algorithm
 SchedulingAlgorithm = Literal["round_robin", "fcfs", "sjf", "ljf", "priority"]
 
 class TaskScheduler:
