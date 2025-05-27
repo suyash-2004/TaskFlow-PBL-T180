@@ -918,5 +918,4 @@ const ScheduleView = () => {
     </Box>
   );
 };
-
 export default ScheduleView; 
