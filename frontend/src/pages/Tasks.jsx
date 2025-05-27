@@ -13,6 +13,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format, parseISO } from 'date-fns';
 import api from '../services/api';
 
+
 // Default user ID for all tasks since we removed authentication
 const DEFAULT_USER_ID = "default_user";
 
@@ -41,6 +42,8 @@ const Tasks = () => {
     message: '',
     severity: 'success'
   });
+
+
   
   // Form state
   const [taskForm, setTaskForm] = useState({
