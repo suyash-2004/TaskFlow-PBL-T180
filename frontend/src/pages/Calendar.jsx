@@ -11,17 +11,21 @@ const DEFAULT_USER_ID = "default_user";
 // Setup the localizer for BigCalendar
 const localizer = momentLocalizer(moment);
 
-const Calendar = () => {
+const Calendar = () => 
+{
   const [events, setEvents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const fetchCalendarData = async () => {
+  useEffect(() => 
+  {
+    const fetchCalendarData = async () => 
+    {
       setIsLoading(true);
       setError(null);
       
-      try {
+      try 
+      {
         // Get current date info
         const now = new Date();
         const year = now.getFullYear();
@@ -47,10 +51,13 @@ const Calendar = () => {
         })).filter(event => event.start && !isNaN(event.start.getTime()));
         
         setEvents(calendarEvents);
-      } catch (err) {
+      } catch (err) 
+      {
         console.error('Error fetching calendar data:', err);
         setError('Failed to load calendar data. Please try again later.');
-      } finally {
+      } 
+      finally 
+      {
         setIsLoading(false);
       }
     };
@@ -81,7 +88,8 @@ const Calendar = () => {
     }
     
     // Apply different style for completed tasks
-    if (event.resource?.status === 'completed') {
+    if (event.resource?.status === 'completed') 
+    {
       return {
         style: {
           backgroundColor,
@@ -92,7 +100,8 @@ const Calendar = () => {
       };
     }
     
-    return {
+    return 
+    {
       style: {
         backgroundColor,
         border: 'none'
@@ -100,7 +109,8 @@ const Calendar = () => {
     };
   };
 
-  if (isLoading) {
+  if (isLoading) 
+  {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="70vh">
         <CircularProgress />
@@ -108,7 +118,8 @@ const Calendar = () => {
     );
   }
   
-  if (error) {
+  if (error) 
+  {
     return (
       <Box mt={4} p={2}>
         <Typography color="error" variant="h6">{error}</Typography>
@@ -137,3 +148,4 @@ const Calendar = () => {
 };
 
 export default Calendar; 
+//Updated
