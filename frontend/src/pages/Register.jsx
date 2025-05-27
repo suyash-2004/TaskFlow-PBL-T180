@@ -18,7 +18,6 @@ const Register = () => {
   const [formErrors, setFormErrors] = useState({});
   const { register, error } = useAuth();
   const navigate = useNavigate();
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData({
